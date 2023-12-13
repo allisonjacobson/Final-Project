@@ -1,0 +1,421 @@
+---
+title: "Final"
+author: "Allison Jacobson + Keegan Fields"
+format: 
+  html:
+    embed-resources: true
+editor: visual
+---
+
+# Violent Crimes in Los Angeles, California (2010-2023)
+
+## About The Data
+
+The data sets used in this study contain nearly three million reported crimes from 2010-2023. There are 28 attributes. In this study, only crimes considered violent are analyzed. These crimes are: Homicide, Rape, Robbery, and Aggravated Assault. To clean the data, we:
+
+-   Removed duplicate rows
+
+-   Removed unnecessary columns
+
+-   Removed 'non-violent' crimes
+
+-   Set NA values to 0
+
+-   Added population variable
+
+```{r include = FALSE}
+install.packages("readr", repos="http://cran.us.r-project.org")
+install.packages("dplyr", repos="http://cran.us.r-project.org")
+install.packages("tidyverse", repos="http://cran.us.r-project.org")
+install.packages("ggridges", repos="http://cran.us.r-project.org")
+install.packages("viridis", repos="http://cran.us.r-project.org")
+install.packages("leaflet", repos="http://cran.us.r-project.org")
+install.packages("leaflet.extras", repos="http://cran.us.r-project.org")
+install.packages("RColorBrewer", repos="http://cran.us.r-project.org")
+install.packages("forecast", repos="http://cran.us.r-project.org")
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(ggridges)
+library(viridis)
+library(RColorBrewer)
+library(forecast)
+```
+
+```{r include = FALSE}
+#reading in the data 
+crime <- read.csv("Crime_Data_from_2020_to_Present.csv")
+crime2 <- read.csv("Crime_Data_from_2010_to_2019.csv")
+
+#cleaning the data 
+#remove duplicate rows
+crime <- distinct(crime)
+
+#remove unneccessary columns
+crime <- subset(crime, select = -c(Part.1.2, Mocodes, Crm.Cd.3, Crm.Cd.4, Status, Status.Desc))
+
+#remove non-violent crimes
+crime <- subset(crime, crime$Crm.Cd %in% c(110, 113, 121, 122, 815, 820, 821, 210, 220, 230, 231, 235, 236, 250, 251, 761, 926))
+
+crime[is.na(crime)] <- 0
+```
+
+```{r include = FALSE}
+#create a new column to easily assign values; will be easier to manipulate
+crime <- mutate(crime, Crime = case_when(
+  Crm.Cd %in% c(110, 113) ~ "Homicide",
+  Crm.Cd %in% c(121, 122, 815, 820, 821) ~ "Rape",
+  Crm.Cd %in% c(210, 220) ~ "Robbery",
+  Crm.Cd %in% c(230, 231, 235, 236, 250, 251, 761, 926) ~ "Aggravated Assault",
+#  Crm.Cd %in% c(310, 320) ~ "Burglary",
+#  Crm.Cd %in% c(510, 520, 433) ~ "Grand Theft",
+#  Crm.Cd %in% c(330, 331, 410, 420, 421) ~ "Burglary",
+  TRUE ~ NA_character_  
+))
+
+crime <- mutate(crime, Weapon_Type = case_when(
+  Weapon.Used.Cd %in% c(101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125) ~ "Firearm",
+  Weapon.Used.Cd %in% c(200, 201, 202, 203, 204, 205, 206, 207) ~ "Knife",
+  Weapon.Used.Cd %in% c(213, 214, 215, 217) ~ "Sharp Object",
+  Weapon.Used.Cd %in% c(515, 400) ~ "Body Part",
+  Weapon.Used.Cd %in% c(112, 113, 208, 209, 210, 516, 514, 513, 512, 511, 510, 212, 216, 218, 219, 220, 221, 223, 300, 301, 509, 508, 507, 506, 505, 504, 503, 502, 501, 500, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312) ~ "Other", 
+  TRUE ~ NA_character_
+  
+))
+
+crime$Population <- 3800000
+
+add_weapon <- function(crime) {
+  crime$weapon <- ifelse(crime$Weapon.Used.Cd == 0, 0, 1)
+  return(crime)
+}
+crime <- add_weapon(crime)
+
+homicide <- subset(crime, crime$Crm.Cd %in% c(110, 113))
+rape <- subset(crime, crime$Crm.Cd %in% c(121, 122, 815, 820, 821))
+robbery <- subset(crime, crime$Crm.Cd %in% c(210, 220))
+assault <- subset(crime, crime$Crm.Cd %in% c(230, 231, 235, 236, 250, 251, 761, 926))
+#burglary <- subset(crime, crime$Crm.Cd %in% c(310, 320, 330, 331, 410, 420, 421))
+#gta <- subset(crime, crime$Crm.Cd %in% c(510, 520, 433))
+
+
+```
+
+## Number of Crimes (2020-2023)
+
+#### Total
+
+```{r echo = FALSE}
+ggplot(crime, aes(x = Crime)) +
+  geom_bar() +
+  geom_text(stat = "count", aes(label = ..count..), vjust = -0.3) +
+  labs(title = "Number of Crimes", x = "Crime Type", y = "Count")+
+  theme_bw()
+```
+
+#### Per Area
+
+```{r echo = FALSE}
+ggplot(crime, aes(x = AREA.NAME)) +
+  geom_bar() +
+  labs(title = "Number of Crimes", x = "Crime Type", y = "Count")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r echo = FALSE}
+library(leaflet)
+library(leaflet.extras)
+
+map <- leaflet() %>%
+  setView(lng = -118.2437, lat = 34.0522, zoom = 9) %>%
+  addTiles()
+
+map <- addHeatmap(
+  map = map,
+  data = crime,
+  lat = ~LAT,
+  lng = ~LON,
+  blur = 25,
+  max = 0.06
+)
+
+map
+```
+
+![](LA Areas Final.gif)
+
+Figure 1: Image of Los Angeles 21 Distinct Areas \[1\]
+
+## Homicides (2020-2023)
+
+```{r echo = FALSE}
+ggplot(homicide, aes(x = AREA.NAME)) +
+  geom_bar() +
+  labs(title = "Number of Homicides By Area", x = "Area", y = "Count")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r echo = FALSE}
+ggplot(homicide, aes(x = TIME.OCC, y = AREA.NAME, fill = ..x..))+
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01)+
+  scale_fill_viridis(name = "Time of Day", option = "A")+
+  labs(title = "Number of Homicides At Different Times of Day By Area",
+       x = "Time of Day (24 Hour Military Time)", 
+       y = "Area")+
+  theme_bw()
+```
+
+```{r echo = FALSE}
+homicide_counts <- table(homicide$Weapon_Type)
+
+homicide_data <- as.data.frame(homicide_counts)
+
+colnames(homicide_data) <- c("Weapon_Type", "Count")
+
+homicide_data <- homicide_data[order(homicide_data$Count, decreasing = TRUE), ]
+
+homicide_data$Percentage <- (homicide_data$Count / sum(homicide_data$Count)) * 100
+
+ggplot(homicide_data, aes(x = "", y = Count, fill = Weapon_Type)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y", start = 0) +
+  ggtitle("Distribution of Weapon Type in Homicide Crimes") +
+  labs(fill = "Weapon Type")+
+  scale_fill_brewer(palette = "Reds", direction = -1)+
+  theme_bw()
+```
+
+## Rapes (2020-2023)
+
+```{r echo = FALSE}
+ggplot(rape, aes(x = AREA.NAME)) +
+  geom_bar() +
+  labs(title = "Number of Rapes By Area", x = "Area", y = "Count")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r echo = FALSE}
+ggplot(rape, aes(x = TIME.OCC, y = AREA.NAME, fill = ..x..))+
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01)+
+  scale_fill_viridis(name = "Time of Day", option = "A")+
+  labs(title = "Number of Rapes At Different Times of Day By Area",
+       x = "Time of Day (24 Hour Military Time)", 
+       y = "Area")+
+  theme_bw()
+```
+
+```{r echo = FALSE}
+rape_counts <- table(rape$Weapon_Type)
+
+rape_data <- as.data.frame(rape_counts)
+
+colnames(rape_data) <- c("Weapon_Type", "Count")
+
+rape_data <- rape_data[order(rape_data$Count, decreasing = TRUE), ]
+
+rape_data$Percentage <- (rape_data$Count / sum(rape_data$Count)) * 100
+
+ggplot(rape_data, aes(x = "", y = Count, fill = Weapon_Type)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y", start = 0) +
+  ggtitle("Distribution of Weapon Type in Rape Crimes") +
+  labs(fill = "Weapon Type")+
+  scale_fill_brewer(palette = "Reds", direction = -1)+
+  theme_bw()
+```
+
+## Robbery (2020-2023)
+
+```{r echo = FALSE}
+ggplot(robbery, aes(x = AREA.NAME)) +
+  geom_bar() +
+  labs(title = "Number of Robberies By Area", x = "Area", y = "Count")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r echo = FALSE}
+ggplot(robbery, aes(x = TIME.OCC, y = AREA.NAME, fill = ..x..))+
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01)+
+  scale_fill_viridis(name = "Time of Day", option = "A")+
+  labs(title = "Number of Robberies At Different Times of Day By Area",
+       x = "Time of Day (24 Hour Military Time)", 
+       y = "Area")+
+  theme_bw()
+```
+
+```{r echo = FALSE}
+robbery_counts <- table(robbery$Weapon_Type)
+
+robbery_data <- as.data.frame(robbery_counts)
+
+colnames(robbery_data) <- c("Weapon_Type", "Count")
+
+robbery_data <- robbery_data[order(robbery_data$Count, decreasing = TRUE), ]
+
+robbery_data$Percentage <- (robbery_data$Count / sum(robbery_data$Count)) * 100
+
+ggplot(robbery_data, aes(x = "", y = Count, fill = Weapon_Type)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y", start = 0) +
+  ggtitle("Distribution of Weapon Type in Robbery Crimes") +
+  labs(fill = "Weapon Type")+
+  scale_fill_brewer(palette = "Reds", direction = -1)+
+  theme_bw()
+```
+
+## Aggravated Assaults (2020-2023)
+
+```{r echo = FALSE}
+ggplot(assault, aes(x = AREA.NAME)) +
+  geom_bar() +
+  labs(title = "Number of Aggravated Assaults By Area", x = "Area", y = "Count")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r echo = FALSE}
+ggplot(assault, aes(x = TIME.OCC, y = AREA.NAME, fill = ..x..))+
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01)+
+  scale_fill_viridis(name = "Time of Day", option = "A")+
+  labs(title = "Number of Aggravated Assaults At Different Times of Day By Area",
+       x = "Time of Day (24 Hour Military Time)", 
+       y = "Area")+
+  theme_bw()
+```
+
+```{r echo = FALSE}
+assault_counts <- table(assault$Weapon_Type)
+
+assault_data <- as.data.frame(assault_counts)
+
+colnames(assault_data) <- c("Weapon_Type", "Count")
+
+assault_data <- assault_data[order(assault_data$Count, decreasing = TRUE), ]
+
+assault_data$Percentage <- (assault_data$Count / sum(assault_data$Count)) * 100
+
+ggplot(assault_data, aes(x = "", y = Count, fill = Weapon_Type)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y", start = 0) +
+  ggtitle("Distribution of Weapon Type in Aggravated Assault Crimes") +
+  labs(fill = "Weapon Type")+
+  scale_fill_brewer(palette = "Reds", direction = -1)+
+  theme_bw()
+```
+
+## Crime From 2010 to 2023
+
+```{r include = FALSE}
+crime_copy <- crime
+#crime2 <- Crime_Data_from_2010_to_2019
+
+crime_copy <- subset(crime_copy, select = c(DATE.OCC, Crime, Population))
+
+crime2 <- subset(crime2, select = -c(Part.1.2, Mocodes, Crm.Cd.3, Crm.Cd.4, Status, Status.Desc))
+
+crime2 <- subset(crime2, crime2$Crm.Cd %in% c(110, 113, 121, 122, 815, 820, 821, 210, 220, 230, 231, 235, 236, 250, 251, 761, 926))
+
+#crime2[is.na(crime2)] <- 0
+
+crime2$Population <- 3800000
+
+crime2 <- mutate(crime2, Crime = case_when(
+  Crm.Cd %in% c(110, 113) ~ "Homicide",
+  Crm.Cd %in% c(121, 122, 815, 820, 821) ~ "Rape",
+  Crm.Cd %in% c(210, 220) ~ "Robbery",
+  Crm.Cd %in% c(230, 231, 235, 236, 250, 251, 761, 926) ~ "Aggravated Assault",
+#  Crm.Cd %in% c(310, 320) ~ "Burglary",
+#  Crm.Cd %in% c(510, 520, 433) ~ "Grand Theft",
+#  Crm.Cd %in% c(330, 331, 410, 420, 421) ~ "Burglary",
+  TRUE ~ NA_character_  
+))
+
+crime2 <- subset(crime2, select = c(DATE.OCC, Crime, Population))
+
+#crime2$DATE.OCC <- crime2$DATE.OCC
+#crime2$Crm.Cd <- crime2$`Crm Cd`
+#crime2$`DATE OCC` <- NULL  
+
+combined_data <- rbind(crime_copy, crime2)
+```
+
+```{r echo = FALSE}
+combined_data$DATE.OCC <- as.Date(combined_data$DATE.OCC, format="%m/%d/%Y")
+
+combined_data$Year <- format(combined_data$DATE.OCC, "%Y")
+
+combined_data$Count <- 1  
+
+crime_counts <- aggregate(Count ~ Year, data = combined_data, FUN = sum)
+
+merged_data <- merge(crime_counts, combined_data[, c("Year", "Population")], by = "Year")
+
+merged_data$CrimeRate <- merged_data$Count / merged_data$Population * 100000
+
+ggplot(merged_data, aes(x = Year)) +
+  geom_line(aes(y = CrimeRate, group = 1), color = "black", size = 1) +
+  labs(title = "Violent Crime Rate (2010-2023)", x = "Year", y = "Violent Crime Rate per 100,000 People")+
+  theme_bw()
+
+
+```
+
+```{r echo = FALSE}
+combined_data$DATE.OCC <- as.Date(combined_data$DATE.OCC, format="%m/%d/%Y")
+
+combined_data$Year <- format(combined_data$DATE.OCC, "%Y")
+
+combined_data$Count <- 1
+
+crime_counts <- aggregate(Count ~ Year + Crime, data = combined_data, FUN = sum)
+
+merged_data <- merge(crime_counts, combined_data[, c("Year", "Population")], by = "Year")
+
+merged_data$CrimeRate <- merged_data$Count / merged_data$Population * 100000
+
+ggplot(merged_data, aes(x = Year, y = CrimeRate, group = Crime, color = Crime)) +
+  geom_line(size = 1) +
+  labs(title = "Crime Rates By Violent Crime (2010-2023)", x = "Year", y = "Crime Rate per 100,000 People") +
+ # scale_fill_brewer(palette = "Greys", direction = -1)
+  theme_bw()
+
+```
+
+## Quantitative Analysis
+
+```{r echo = FALSE}
+years <- c(2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023)
+crime_rates <- c(601.5789, 561.8421, 525.4474
+, 480.1579, 383.5, 680.6579, 761.1053, 798.5789, 784.2632, 764.3947, 750.3158, 1056.737, 822.2632, 737.2895)
+
+agg_data <-data.frame(Year = years, CrimeRate = crime_rates)
+ts_data <- ts(agg_data$CrimeRate, start = min(agg_data$Year), frequency = 1)
+
+model <- auto.arima(ts_data)
+
+forecast_result <- forecast(model, h = 2)
+
+plot(forecast_result, main = "Crime Rate Forecast", xlab = "Year", ylab = "Crime Rate")
+
+lines(forecast_result$mean, col = "blue", lty = 2)
+
+legend("topleft", legend = c("Observed", "Forecast"), col = c("black", "blue"), lty = c(1, 2))
+```
+
+```{r echo = FALSE}
+contingency_table <- table(crime$AREA.NAME, crime$Crime)
+#print(contingency_table)
+result <- chisq.test(contingency_table)
+print(result)
+```
+
+## References
+
+\[1\] LAPD\'s main map, digital image, Los Angeles Community Policing, accessed December 13, 2023,
+
+\< http://www.lacp.org/CP%20Tutorial/LAPD%20-%20main%20map.html\>
